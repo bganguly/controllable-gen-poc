@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 
 from app.config import configure_logging, get_settings
 from app.models.db import create_tables, init_engine
-from app.routers import auth, inference, mcp, reports
+from app.routers import auth, demo, inference, mcp, reports
 from app.routers.inference import set_redis
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ app.include_router(inference.router)
 app.include_router(auth.router)
 app.include_router(mcp.router)
 app.include_router(reports.router)
+app.include_router(demo.router)
 
 
 @app.get("/metrics", include_in_schema=False)

@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from redis.asyncio import Redis
 from sqlalchemy import select
@@ -67,6 +67,7 @@ def _model_allowed(api_key: APIKey, model: str) -> bool:
 @router.post("/v1/chat/completions")
 async def chat_completions(
     body: ChatCompletionRequest,
+    response: Response,
     api_key: APIKey = Depends(_authenticate),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -188,6 +189,16 @@ async def chat_completions(
     REQUEST_DURATION.labels(model=resolved_model).observe(latency_ms / 1000)
     TOKEN_USAGE.labels(model=resolved_model, token_type="prompt").inc(prompt_tokens)
     TOKEN_USAGE.labels(model=resolved_model, token_type="completion").inc(completion_tokens)
+
+    response.headers["X-Gateway-Provider"] = provider
+    response.headers["X-Gateway-Model"] = resolved_model
+    response.headers["X-Gateway-Latency-Ms"] = str(latency_ms)
+    response.headers["X-Gateway-Cost-Usd"] = f"{cost:.6f}"
+    response.headers["X-Gateway-Prompt-Tokens"] = str(prompt_tokens)
+    response.headers["X-Gateway-Completion-Tokens"] = str(completion_tokens)
+    response.headers["X-Gateway-Audit-Hash"] = request_hash[:16]
+    response.headers["X-Gateway-Key-Owner"] = api_key.owner
+    response.headers["X-Gateway-Key-Tier"] = api_key.rate_limit_tier
 
     await write_audit_log(
         db,
