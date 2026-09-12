@@ -1,5 +1,7 @@
 import os
 import json
+import base64
+import urllib.request
 import anthropic
 import openai
 from fastapi import FastAPI, HTTPException
@@ -189,9 +191,10 @@ def generate_image(dalle_prompt: str) -> str:
         size="1024x1024",
         quality="standard",
         n=1,
-        response_format="b64_json",
     )
-    return resp.data[0].b64_json  # type: ignore[union-attr]
+    url = resp.data[0].url  # type: ignore[union-attr]
+    with urllib.request.urlopen(url) as r:
+        return base64.b64encode(r.read()).decode()
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
