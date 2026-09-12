@@ -1,7 +1,5 @@
 import os
 import json
-import base64
-import urllib.request
 import anthropic
 import openai
 from fastapi import FastAPI, HTTPException
@@ -186,15 +184,13 @@ def build_dalle_prompt(spec: dict) -> str:
 
 def generate_image(dalle_prompt: str) -> str:
     resp = _openai.images.generate(
-        model="dall-e-3",
+        model="gpt-image-1",
         prompt=dalle_prompt,
         size="1024x1024",
         quality="standard",
         n=1,
     )
-    url = resp.data[0].url  # type: ignore[union-attr]
-    with urllib.request.urlopen(url) as r:
-        return base64.b64encode(r.read()).decode()
+    return resp.data[0].b64_json  # type: ignore[union-attr]
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
