@@ -24,9 +24,20 @@ CONTROL_SPEC_SCHEMA = """{
   "negative": "<elements to explicitly avoid>"
 }"""
 
+SYSTEM_EXTRACT = (
+    "You are an expert visual composition analyst. "
+    "Extract a structured control specification from the user's image description. "
+    "Return JSON only, no markdown fences."
+)
+SYSTEM_REFINE = (
+    "You are an expert visual composition analyst. "
+    "Refine the given control spec based on user feedback. Return JSON only, no markdown fences."
+)
+
 
 class GenerateRequest(BaseModel):
     prompt: str
+    provider: str = "anthropic"
     prev_control_spec: dict | None = None
     feedback: str | None = None
 
@@ -42,24 +53,19 @@ def _strip_json_fences(text: str) -> str:
     return text.strip()
 
 
-def extract_control_spec(prompt: str, prev_spec: dict | None, feedback: str | None) -> dict:
+# ── Anthropic (Claude) ─────────────────────────────────────────────────────────
+
+def _extract_spec_anthropic(prompt: str, prev_spec: dict | None, feedback: str | None) -> dict:
     if prev_spec and feedback:
-        system = "You are an expert visual composition analyst. Refine the given control spec based on user feedback. Return JSON only."
+        system = SYSTEM_REFINE
         user_msg = (
             f"Previous spec:\n{json.dumps(prev_spec, indent=2)}\n\n"
             f"User feedback: {feedback}\n\n"
-            f"Return an updated JSON spec following this schema exactly:\n{CONTROL_SPEC_SCHEMA}"
+            f"Return an updated JSON spec:\n{CONTROL_SPEC_SCHEMA}"
         )
     else:
-        system = (
-            "You are an expert visual composition analyst. "
-            "Extract a structured control specification from the user's image description. "
-            "Return JSON only, no markdown fences."
-        )
-        user_msg = (
-            f"User description: {prompt}\n\n"
-            f"Return a JSON control spec following this schema exactly:\n{CONTROL_SPEC_SCHEMA}"
-        )
+        system = SYSTEM_EXTRACT
+        user_msg = f"User description: {prompt}\n\nReturn a JSON control spec:\n{CONTROL_SPEC_SCHEMA}"
 
     resp = _anthropic.messages.create(
         model="claude-sonnet-5",
@@ -67,9 +73,90 @@ def extract_control_spec(prompt: str, prev_spec: dict | None, feedback: str | No
         system=system,
         messages=[{"role": "user", "content": user_msg}],
     )
-    text = _strip_json_fences(resp.content[0].text)
-    return json.loads(text)
+    raw = resp.content[0].text if resp.content else None
+    if not raw:
+        raise ValueError("Empty response from Claude")
+    return json.loads(_strip_json_fences(raw))
 
+
+def _critique_anthropic(image_b64: str, spec: dict, original_prompt: str) -> str:
+    resp = _anthropic.messages.create(
+        model="claude-sonnet-5",
+        max_tokens=512,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        f"Original intent: {original_prompt}\n\n"
+                        f"Control spec applied:\n{json.dumps(spec, indent=2)}\n\n"
+                        "Critique this image in 2-3 sentences: what was captured well and what misses "
+                        "the intent? End with one concrete suggestion for the next iteration."
+                    ),
+                },
+            ],
+        }],
+    )
+    return (resp.content[0].text if resp.content else None) or "Critique unavailable."
+
+
+# ── OpenAI (GPT-4o) ───────────────────────────────────────────────────────────
+
+def _extract_spec_openai(prompt: str, prev_spec: dict | None, feedback: str | None) -> dict:
+    if prev_spec and feedback:
+        messages = [
+            {"role": "system", "content": SYSTEM_REFINE},
+            {"role": "user", "content": (
+                f"Previous spec:\n{json.dumps(prev_spec, indent=2)}\n\n"
+                f"User feedback: {feedback}\n\n"
+                f"Return an updated JSON spec:\n{CONTROL_SPEC_SCHEMA}"
+            )},
+        ]
+    else:
+        messages = [
+            {"role": "system", "content": SYSTEM_EXTRACT},
+            {"role": "user", "content": f"User description: {prompt}\n\nReturn a JSON control spec:\n{CONTROL_SPEC_SCHEMA}"},
+        ]
+
+    resp = _openai.chat.completions.create(
+        model="gpt-4o",
+        response_format={"type": "json_object"},
+        messages=messages,  # type: ignore[arg-type]
+        max_tokens=1024,
+    )
+    raw = resp.choices[0].message.content or ""
+    return json.loads(raw)
+
+
+def _critique_openai(image_b64: str, spec: dict, original_prompt: str) -> str:
+    resp = _openai.chat.completions.create(
+        model="gpt-4o",
+        messages=[{  # type: ignore[list-item]
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                {
+                    "type": "text",
+                    "text": (
+                        f"Original intent: {original_prompt}\n\n"
+                        f"Control spec applied:\n{json.dumps(spec, indent=2)}\n\n"
+                        "Critique this image in 2-3 sentences: what was captured well and what misses "
+                        "the intent? End with one concrete suggestion for the next iteration."
+                    ),
+                },
+            ],
+        }],
+        max_tokens=512,
+    )
+    return resp.choices[0].message.content or "Critique unavailable."
+
+
+# ── shared ────────────────────────────────────────────────────────────────────
 
 def build_dalle_prompt(spec: dict) -> str:
     parts: list[str] = []
@@ -107,35 +194,7 @@ def generate_image(dalle_prompt: str) -> str:
     return resp.data[0].b64_json  # type: ignore[union-attr]
 
 
-def critique_image(image_b64: str, spec: dict, original_prompt: str) -> str:
-    resp = _anthropic.messages.create(
-        model="claude-sonnet-5",
-        max_tokens=512,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": image_b64,
-                    },
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        f"Original intent: {original_prompt}\n\n"
-                        f"Control spec applied:\n{json.dumps(spec, indent=2)}\n\n"
-                        "Critique this generated image in 2-3 sentences: what was captured well "
-                        "and what misses the intent? End with one concrete suggestion for the next iteration."
-                    ),
-                },
-            ],
-        }],
-    )
-    return resp.content[0].text
-
+# ── routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 async def root():
@@ -149,8 +208,13 @@ async def health():
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
+    use_openai = req.provider == "openai"
+
     try:
-        spec = extract_control_spec(req.prompt, req.prev_control_spec, req.feedback)
+        if use_openai:
+            spec = _extract_spec_openai(req.prompt, req.prev_control_spec, req.feedback)
+        else:
+            spec = _extract_spec_anthropic(req.prompt, req.prev_control_spec, req.feedback)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Control spec extraction failed: {e}")
 
@@ -162,7 +226,8 @@ async def generate(req: GenerateRequest):
         raise HTTPException(status_code=500, detail=f"Image generation failed: {e}")
 
     try:
-        critique = critique_image(image_b64, spec, req.prompt)
+        critique = _critique_openai(image_b64, spec, req.prompt) if use_openai \
+            else _critique_anthropic(image_b64, spec, req.prompt)
     except Exception:
         critique = "Critique unavailable."
 

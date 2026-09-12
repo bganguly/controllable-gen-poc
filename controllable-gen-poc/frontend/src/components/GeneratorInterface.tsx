@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import type { Provider } from "../App";
 
 interface ControlSpec {
   subject?: string;
@@ -67,7 +68,7 @@ const EXAMPLE_PROMPTS = [
   "Surreal floating islands above clouds, digital art",
 ];
 
-export default function GeneratorInterface() {
+export default function GeneratorInterface({ provider }: { provider: Provider }) {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
@@ -82,7 +83,7 @@ export default function GeneratorInterface() {
     setLoading(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = { prompt: p };
+      const body: Record<string, unknown> = { prompt: p, provider };
       if (overrideFeedback && result) {
         body.prev_control_spec = result.control_spec;
         body.feedback = overrideFeedback;
