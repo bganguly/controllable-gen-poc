@@ -31,7 +31,7 @@ tax-email-agent/
 ### Layout: two-panel
 
 **Top bar**
-- Provider toggle: `Claude | OpenAI | Gemini` (3 buttons; active provider sent as
+- Provider toggle: `Claude | OpenAI | Gemini | NVIDIA` (4 buttons; active provider sent as
   `X-Provider` header on every API call)
 
 **Left panel — work queue**
@@ -124,6 +124,7 @@ For city+state without zip: use TaxJar's `city` + `state` query params.
 | Claude | anthropic Python SDK | claude-sonnet-4-6 |
 | OpenAI | openai Python SDK | gpt-4o |
 | Gemini | google-generativeai SDK | gemini-1.5-pro |
+| NVIDIA | openai SDK (NIM endpoint) | meta/llama-3.1-70b-instruct |
 
 All three use JSON mode / structured output for step 1.
 Selected via `X-Provider: claude|openai|gemini` request header.
@@ -157,5 +158,6 @@ Same pattern as `../portfolio/js/main.js`:
 ANTHROPIC_API_KEY=
 OPENAI_API_KEY=
 GEMINI_API_KEY=
+NVIDIA_API_KEY=
 TAXJAR_API_KEY=
 ```
