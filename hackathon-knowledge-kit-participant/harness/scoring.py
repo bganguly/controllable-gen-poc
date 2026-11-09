@@ -119,7 +119,7 @@ def score_item(item: dict, ans, judge: bool = False) -> dict:
     if cat == "should_refuse":
         correctness = 1.0 if refused and not trap and not _numbers(text) - _numbers(item["question"]) else 0.0
     else:
-        correctness = (len(hit) / len(must)) if must else 0.0
+        correctness = (len(hit) / len(must)) if must else 1.0
         if judge and item.get("expected_answer"):
             j = _llm_judge(item, text)
             if j is not None:
